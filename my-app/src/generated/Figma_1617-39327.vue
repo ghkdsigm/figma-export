@@ -1,0 +1,1 @@
+<template>\n<div class="flex gap-[10px] px-[16px] py-[19px] justify-center items-center w-[80px] h-[36px] bg-[#00ad50] rounded-[4px] overflow-hidden">\n  <span class="block whitespace-pre-wrap text-[14px] font-bold leading-[14px] tracking-[0px] text-left align-middle text-[#ffffff]">Button</span>\n</div>\n</template>
