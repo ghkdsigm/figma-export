@@ -11,39 +11,44 @@ export interface Provider {
 }
 
 export const OLLAMA_ENDPOINT = process.env.OLLAMA_URL || 'http://127.0.0.1:11434'
-export const MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b' // 설치한 태그와 정확히 일치
+export const MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b'
 
 export const OllamaProvider: Provider = {
 	name: 'ollama',
 	async generate({ system, user }: GenParams): Promise<string> {
-		const res = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				model: MODEL,
-				messages: [
-					{ role: 'system', content: system },
-					{ role: 'user', content: user },
-				],
-				stream: false, // 비스트리밍 파서면 필수
-				format: 'json', // 최상위에 둔다
-				options: {
-					temperature: 0.2,
-					num_ctx: 2048, // 8192 → 2048로 내려 속도 개선
-					num_predict: 256,
-					num_thread: 10, // 로그에 cores=10
-				},
-			}),
-		})
-		if (!res.ok) {
-			const t = await res.text().catch(() => '')
-			throw new Error(`Ollama error: ${res.status} ${res.statusText} :: ${t}`)
+		const ctrl = new AbortController()
+		const timer = setTimeout(() => ctrl.abort(), 60000)
+
+		try {
+			const res = await fetch(`${OLLAMA_ENDPOINT}/api/generate`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				signal: ctrl.signal,
+				body: JSON.stringify({
+					model: MODEL,
+					// chat 대신 generate: system+user 합친 단일 프롬프트
+					prompt: `${system}\n\n${user}`,
+					stream: false,
+					format: 'json', // 반드시 최상위
+					options: {
+						temperature: 0,
+						num_ctx: 2048,
+						num_predict: 192, // 96→192 : JSON 본문이 끊기지 않도록 여유
+						num_thread: 10,
+					},
+				}),
+			})
+
+			if (!res.ok) {
+				const txt = await res.text().catch(() => '')
+				throw new Error(`HTTP ${res.status} :: ${txt}`)
+			}
+			const j: any = await res.json()
+			const content = j?.response?.trim()
+			if (!content) throw new Error('empty content')
+			return content
+		} finally {
+			clearTimeout(timer)
 		}
-		const j: any = await res.json()
-		const content = j?.message?.content
-		if (typeof content !== 'string' || content.trim().length === 0) {
-			throw new Error('Ollama empty content')
-		}
-		return content
 	},
 }
