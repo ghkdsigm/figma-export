@@ -13,7 +13,9 @@ const copiedKey = ref<string | null>(null)
 
 function toFrontendImportPath(absOrRelFile: string) {
   const baseName = absOrRelFile.split(/[\\/]/).pop() || absOrRelFile
-  return `../generated/${baseName}`
+  // 매번 다른 쿼리 스트링을 붙여서 Vite/브라우저 캐시 무력화
+  const v = Date.now()
+  return `../generated/${baseName}?v=${v}`
 }
 
 function findCompByNodeId(id: string) {
@@ -61,19 +63,46 @@ async function run() {
     const res = await fetch('http://localhost:8787/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodeIds: [nodeId.value], useAI: useAI.value }),
+      body: JSON.stringify({
+        nodeIds: [nodeId.value],
+        useAI: useAI.value,
+        layoutMode: 'flow',      // 우선 강제로 플로우
+        allowModal: false        // 모달 판정 꺼두기
+      }),
     })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(text || `HTTP ${res.status}`)
+    }
+
     const json: GenResult = await res.json()
     result.value = json
 
+    // 1) 동적 임포트 시도 (캐시 무효화 쿼리로 즉시 반영)
     for (const item of json.results) {
       if (!item.filename) continue
       const path = toFrontendImportPath(item.filename)
-      const mod = await import(/* @vite-ignore */ path)
-      liveComponents.value.push({ key: item.nodeId, comp: mod.default })
+      try {
+        const mod = await import(/* @vite-ignore */ path)
+        liveComponents.value.push({ key: item.nodeId, comp: (mod as any).default })
+      } catch (e) {
+        console.warn('dynamic import failed, fallback to glob', e)
+      }
+    }
+
+    // 2) 폴백: glob로 모두 eager 로딩 후 매칭
+    if (!liveComponents.value.length) {
+      const modules = import.meta.glob('../generated/*.vue', { eager: true })
+      for (const [p, m] of Object.entries(modules)) {
+        const base = p.split('/').pop()
+        const hit = json.results.find(r => (r.filename?.split(/[\\/]/).pop()) === base)
+        if (hit) {
+          liveComponents.value.push({ key: hit.nodeId, comp: (m as any).default })
+        }
+      }
     }
   } catch (e: any) {
-    alert(e?.message || 'error')
+    alert(e?.message || '생성 중 오류가 발생했습니다.')
   } finally {
     loading.value = false
   }
@@ -84,7 +113,7 @@ async function run() {
   <div class="p-6 space-y-6">
     <h1 class="text-xl font-bold">Figma → Vue Generator</h1>
 
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <input
         v-model="nodeId"
         placeholder="nodeId (예: 1558:91759)"
@@ -103,13 +132,13 @@ async function run() {
       </button>
     </div>
 
-    <div v-if="result" class="space-y-5 py-4 max-w-[50vw] overflow-x-auto">
+    <div v-if="result" class="space-y-5 py-4 max-w-[80vw] overflow-x-auto">
       <div class="text-sm text-gray-600">{{ result.count }} file(s) generated</div>
 
       <div
         v-for="item in result.results"
         :key="item.nodeId"
-        class="border rounded-lg p-4 space-y-3"
+        class="border rounded-lg p-4 space-y-3 bg-white"
       >
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="font-medium">
