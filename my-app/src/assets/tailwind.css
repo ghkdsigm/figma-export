@@ -1,0 +1,4 @@
+@import 'tailwindcss';
+
+@source "./**/*.{vue,js,ts}";
+@source "../../../figma-to-vue/output/components/**/*.{vue,js,ts}";
