@@ -1,38 +1,31 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-type GenItem = { nodeId: string; filename: string; code: string }
+type GenItem = { nodeId: string; filename: string; code: string; changes?: string[] }
 type GenResult = { count: number; results: GenItem[] }
 
 const nodeId = ref('')
+const useAI = ref(true)
 const loading = ref(false)
 const result = ref<GenResult | null>(null)
-
-// 동적으로 불러온 컴포넌트들(미리보기)
 const liveComponents = ref<Array<{ key: string; comp: any }>>([])
-
-// 복사 상태 표시용
 const copiedKey = ref<string | null>(null)
 
-// 백엔드 OUT_DIR이 ../my-app/src/generated 라는 가정
 function toFrontendImportPath(absOrRelFile: string) {
   const baseName = absOrRelFile.split(/[\\/]/).pop() || absOrRelFile
   return `../generated/${baseName}`
 }
 
-// nodeId → 동적 컴포넌트 찾기
 function findCompByNodeId(id: string) {
   return liveComponents.value.find((v) => v.key === id)?.comp
 }
 
-// 코드 복사
 async function copyCode(item: GenItem) {
   try {
     await navigator.clipboard.writeText(item.code)
     copiedKey.value = item.nodeId
     setTimeout(() => (copiedKey.value = null), 1200)
   } catch {
-    // clipboard 권한 실패 시 fallback
     const ta = document.createElement('textarea')
     ta.value = item.code
     ta.style.position = 'fixed'
@@ -46,14 +39,11 @@ async function copyCode(item: GenItem) {
   }
 }
 
-// 파일 다운로드 (.vue)
 function downloadVue(item: GenItem) {
   const blob = new Blob([item.code], { type: 'text/plain;charset=utf-8' })
   const a = document.createElement('a')
   const url = URL.createObjectURL(blob)
   a.href = url
-
-  // 파일명은 서버가 알려준 filename의 마지막 조각을 최대한 재사용
   const niceName =
     item.filename?.split(/[\\/]/).pop() || `Figma_${item.nodeId.replace(/[:]/g, '-')}.vue`
   a.download = niceName
@@ -71,13 +61,13 @@ async function run() {
     const res = await fetch('http://localhost:8787/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodeIds: [nodeId.value] }),
+      body: JSON.stringify({ nodeIds: [nodeId.value], useAI: useAI.value }),
     })
     const json: GenResult = await res.json()
     result.value = json
 
-    // 방금 생성된 파일들 동적 import → 미리보기 등록
     for (const item of json.results) {
+      if (!item.filename) continue
       const path = toFrontendImportPath(item.filename)
       const mod = await import(/* @vite-ignore */ path)
       liveComponents.value.push({ key: item.nodeId, comp: mod.default })
@@ -94,12 +84,16 @@ async function run() {
   <div class="p-6 space-y-6">
     <h1 class="text-xl font-bold">Figma → Vue Generator</h1>
 
-    <div class="flex gap-2">
+    <div class="flex items-center gap-2">
       <input
         v-model="nodeId"
         placeholder="nodeId (예: 1558:91759)"
         class="border px-2 py-1 rounded"
       />
+      <label class="flex items-center gap-1 text-sm">
+        <input type="checkbox" v-model="useAI" />
+        Use AI refine
+      </label>
       <button
         @click="run"
         :disabled="loading || !nodeId"
@@ -110,10 +104,8 @@ async function run() {
     </div>
 
     <div v-if="result" class="space-y-5 py-4 max-w-[50vw] overflow-x-auto">
-      <!-- 요약 -->
       <div class="text-sm text-gray-600">{{ result.count }} file(s) generated</div>
 
-      <!-- 결과별 프리뷰 + 코드 복사/다운로드 -->
       <div
         v-for="item in result.results"
         :key="item.nodeId"
@@ -128,13 +120,18 @@ async function run() {
           </div>
         </div>
 
-        <!-- Preview -->
+        <div v-if="item.changes?.length" class="text-xs bg-gray-50 border rounded p-2">
+          <div class="font-semibold mb-1">AI changes</div>
+          <ul class="list-disc pl-5">
+            <li v-for="c in item.changes" :key="c">{{ c }}</li>
+          </ul>
+        </div>
+
         <div class="rounded border p-3 bg-white">
           <div class="text-sm font-semibold mb-2">Preview</div>
           <component :is="findCompByNodeId(item.nodeId)" />
         </div>
 
-        <!-- Code + Actions -->
         <div class="space-y-2">
           <div class="flex gap-2 py-4">
             <button @click="copyCode(item)" class="px-3 py-1 rounded border hover:bg-gray-50">

@@ -4,7 +4,7 @@ import bodyParser from 'body-parser'
 import dotenv from 'dotenv'
 import cors from 'cors'
 import generateRouter from './routes/generate'
-import fetch from 'node-fetch' // Node 18이면 없어도 됨. 자동호출에만 사용.
+//import fetch from 'node-fetch' // Node 18이면 없어도 됨. 자동호출에만 사용.
 
 // .env
 dotenv.config()
